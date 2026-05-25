@@ -1,0 +1,21 @@
+# Deep learning
+tensorflow>=2.16,<2.22
+keras>=3.0,<4.0
+
+# Scientific computing and data handling
+numpy>=1.26,<3.0
+pandas>=2.2,<3.0
+scikit-learn>=1.4,<2.0
+
+# Image processing
+scikit-image>=0.23,<1.0
+opencv-python>=4.9,<5.0
+pillow>=10.2,<12.0
+
+# Visualization and experiment tracking
+matplotlib>=3.8,<4.0
+tqdm>=4.66,<5.0
+
+# Notebooks, useful for exploration and figures
+jupyter>=1.1,<2.0
+ipykernel>=6.29,<7.0
