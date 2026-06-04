@@ -209,6 +209,12 @@ Predictions are saved as binary PNG masks:
 The `--apply-fov` flag forces pixels outside the DRIVE field of view to
 background.
 
+To generate segmentations with an ensemble of the five cross-validation folds:
+
+```bash
+python src/predict_ensemble.py --models-dir outputs/models/cv_bce_dice_flips_valloss --split test --threshold 0.50 --output-dir outputs/segmentations/final_ensemble_test --apply-fov
+```
+
 ## Evaluate with DICE
 
 Evaluate a trained model on the test split:
@@ -229,6 +235,14 @@ dice_mean
 ```
 
 For the DRIVE test split, both manual expert masks are used when available.
+
+Evaluate an ensemble by averaging fold probabilities before thresholding:
+
+```bash
+python src/evaluate_ensemble.py --models-dir outputs/models/cv_bce_dice_flips_valloss --split test --threshold 0.50 --output outputs/results/final_ensemble_test.csv --apply-fov
+```
+
+The ensemble script also writes a summary CSV next to the per-image results.
 
 ## Threshold Experiments
 
@@ -264,8 +278,11 @@ src/
   train.py             # pilot training and K-fold training
   check_model_load.py  # Keras 3 saved-model loading check
   tune_threshold_cv.py # threshold search on CV validation folds
+  ensemble.py          # shared ensemble inference helpers
   predict.py           # PNG segmentation generation
+  predict_ensemble.py  # PNG generation with averaged fold probabilities
   evaluate.py          # DICE evaluation and CSV output
+  evaluate_ensemble.py # DICE evaluation with averaged fold probabilities
   config.py            # shared default settings
 ```
 

@@ -80,6 +80,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Random seed.")
     parser.add_argument("--dry-run", action="store_true", help="Load data and build the model without training.")
     parser.add_argument("--augment-flips", action="store_true", help="Add synchronized flip augmentations to training folds.")
+    parser.add_argument("--checkpoint-monitor", default="val_dice_coef", help="Metric monitored by ModelCheckpoint.")
+    parser.add_argument("--checkpoint-mode", choices=("min", "max", "auto"), default="max", help="ModelCheckpoint mode.")
+    parser.add_argument("--early-stopping-monitor", default="val_dice_coef", help="Metric monitored by EarlyStopping.")
+    parser.add_argument("--early-stopping-mode", choices=("min", "max", "auto"), default="max", help="EarlyStopping mode.")
+    parser.add_argument("--patience", type=int, default=8, help="EarlyStopping patience.")
     return parser.parse_args()
 
 
@@ -171,15 +176,15 @@ def train_one_fold(
     callbacks = [
         keras.callbacks.ModelCheckpoint(
             filepath=model_path,
-            monitor="val_dice_coef",
-            mode="max",
+            monitor=args.checkpoint_monitor,
+            mode=args.checkpoint_mode,
             save_best_only=True,
             verbose=1,
         ),
         keras.callbacks.EarlyStopping(
-            monitor="val_dice_coef",
-            mode="max",
-            patience=8,
+            monitor=args.early_stopping_monitor,
+            mode=args.early_stopping_mode,
+            patience=args.patience,
             restore_best_weights=True,
         ),
         keras.callbacks.ReduceLROnPlateau(
@@ -240,6 +245,11 @@ def save_fold_metadata(
         "depth": args.depth,
         "dropout": args.dropout,
         "augment_flips": args.augment_flips,
+        "checkpoint_monitor": args.checkpoint_monitor,
+        "checkpoint_mode": args.checkpoint_mode,
+        "early_stopping_monitor": args.early_stopping_monitor,
+        "early_stopping_mode": args.early_stopping_mode,
+        "patience": args.patience,
         "seed": args.seed,
     }
     output_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
