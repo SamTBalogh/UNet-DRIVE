@@ -11,9 +11,11 @@ from data import binarize_mask, list_drive_samples, load_drive_sample
 from ensemble import (
     configure_inference_environment,
     find_model_paths,
+    infer_resize_strategy,
     load_models,
     predict_ensemble_probability,
     probability_to_binary_mask,
+    resolve_models_image_size,
 )
 
 
@@ -21,9 +23,10 @@ def main() -> None:
     args = parse_args()
     configure_inference_environment(device=args.device, cuda_malloc_async=args.cuda_malloc_async)
 
-    image_size = (args.image_height, args.image_width)
+    resize_strategy = infer_resize_strategy(args.models_dir, requested=args.resize_strategy)
     model_paths = find_model_paths(args.models_dir, pattern=args.model_pattern)
     models = load_models(model_paths)
+    image_size = resolve_models_image_size(models, fallback=(args.image_height, args.image_width))
     model_names = [path.name for path in model_paths]
 
     samples = list_drive_samples(args.data_dir, split=args.split, require_manual_2=args.split == "test")
@@ -32,6 +35,7 @@ def main() -> None:
         model_names=model_names,
         samples=samples,
         image_size=image_size,
+        resize_strategy=resize_strategy,
         threshold=args.threshold,
         apply_fov=args.apply_fov,
         ensemble_name=args.ensemble_name,
@@ -46,6 +50,8 @@ def main() -> None:
 
     dice_values = [float(row["dice_mean"]) for row in rows]
     print(f"Loaded {len(models)} models: {', '.join(model_names)}")
+    print(f"Preprocessing strategy: {resize_strategy}")
+    print(f"Model image size: {image_size}")
     print(f"Saved evaluation to {output_path}")
     print(f"Saved summary to {summary_path}")
     print(f"Mean DICE: {np.mean(dice_values):.4f}")
@@ -74,6 +80,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ensemble-name", default="ensemble", help="Name written in the output CSV.")
     parser.add_argument("--image-height", type=int, default=IMAGE_SIZE[0], help="Model input height.")
     parser.add_argument("--image-width", type=int, default=IMAGE_SIZE[1], help="Model input width.")
+    parser.add_argument(
+        "--resize-strategy",
+        choices=("resize", "pad"),
+        default=None,
+        help="Preprocessing strategy. Defaults to metadata value when available.",
+    )
     parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for vessel pixels.")
     parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside the DRIVE FoV to background.")
     parser.add_argument(
@@ -95,6 +107,7 @@ def evaluate_samples(
     model_names: list[str],
     samples: list,
     image_size: tuple[int, int],
+    resize_strategy: str,
     threshold: float,
     apply_fov: bool,
     ensemble_name: str,
@@ -107,6 +120,7 @@ def evaluate_samples(
             models=models,
             sample=sample,
             image_size=image_size,
+            resize_strategy=resize_strategy,
             apply_fov=apply_fov,
         )
         prediction = probability_to_binary_mask(probability, threshold=threshold)

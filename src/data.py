@@ -9,6 +9,7 @@ from PIL import Image
 
 
 VALID_SPLITS = {"training", "test"}
+RESIZE_STRATEGIES = {"resize", "pad"}
 DEFAULT_IMAGE_SIZE = (512, 512)
 
 
@@ -192,20 +193,144 @@ def resize_array(
         return np.asarray(resized)
 
 
+def ceil_to_multiple(value: int, multiple: int) -> int:
+    if multiple <= 0:
+        raise ValueError("multiple must be a positive integer")
+    return ((value + multiple - 1) // multiple) * multiple
+
+
+def original_image_size(sample: DriveSample) -> tuple[int, int]:
+    image = read_image(sample.image_path)
+    return image.shape[:2]
+
+
+def resolve_preprocessed_image_size(
+    samples: list[DriveSample],
+    resize_strategy: str = "resize",
+    image_size: tuple[int, int] = DEFAULT_IMAGE_SIZE,
+    pad_multiple: int = 16,
+) -> tuple[int, int]:
+    """Return model input size for the selected preprocessing strategy."""
+
+    validate_resize_strategy(resize_strategy)
+    if resize_strategy == "resize":
+        return image_size
+
+    if not samples:
+        raise ValueError("At least one sample is required to resolve padded image size")
+
+    heights = []
+    widths = []
+    for sample in samples:
+        height, width = original_image_size(sample)
+        heights.append(height)
+        widths.append(width)
+    return ceil_to_multiple(max(heights), pad_multiple), ceil_to_multiple(max(widths), pad_multiple)
+
+
+def validate_resize_strategy(resize_strategy: str) -> None:
+    if resize_strategy not in RESIZE_STRATEGIES:
+        valid = ", ".join(sorted(RESIZE_STRATEGIES))
+        raise ValueError(f"Invalid resize_strategy '{resize_strategy}'. Expected one of: {valid}")
+
+
+def pad_array_to_size(array: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """Pad an array symmetrically to (height, width)."""
+
+    target_height, target_width = size
+    height, width = array.shape[:2]
+    if height > target_height or width > target_width:
+        raise ValueError(
+            f"Cannot pad array of shape {(height, width)} to smaller target {size}"
+        )
+
+    pad_top, pad_bottom, pad_left, pad_right = compute_symmetric_padding(
+        current_size=(height, width),
+        target_size=size,
+    )
+    pad_width = [(pad_top, pad_bottom), (pad_left, pad_right)]
+    if array.ndim == 3:
+        pad_width.append((0, 0))
+    return np.pad(array, pad_width=pad_width, mode="constant", constant_values=0)
+
+
+def crop_array_from_padded(array: np.ndarray, original_size: tuple[int, int]) -> np.ndarray:
+    """Crop a symmetrically padded array back to its original (height, width)."""
+
+    original_height, original_width = original_size
+    padded_height, padded_width = array.shape[:2]
+    pad_top, _, pad_left, _ = compute_symmetric_padding(
+        current_size=original_size,
+        target_size=(padded_height, padded_width),
+    )
+    return array[pad_top : pad_top + original_height, pad_left : pad_left + original_width]
+
+
+def compute_symmetric_padding(
+    current_size: tuple[int, int],
+    target_size: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    current_height, current_width = current_size
+    target_height, target_width = target_size
+    if current_height > target_height or current_width > target_width:
+        raise ValueError(f"Current size {current_size} cannot exceed target size {target_size}")
+
+    height_delta = target_height - current_height
+    width_delta = target_width - current_width
+    pad_top = height_delta // 2
+    pad_bottom = height_delta - pad_top
+    pad_left = width_delta // 2
+    pad_right = width_delta - pad_left
+    return pad_top, pad_bottom, pad_left, pad_right
+
+
+def preprocess_array(
+    array: np.ndarray,
+    image_size: tuple[int, int],
+    is_mask: bool,
+    resize_strategy: str,
+) -> np.ndarray:
+    validate_resize_strategy(resize_strategy)
+    if resize_strategy == "resize":
+        return resize_array(array, size=image_size, is_mask=is_mask)
+    return pad_array_to_size(array, size=image_size)
+
+
 def load_preprocessed_sample(
     sample: DriveSample,
     image_size: tuple[int, int] = DEFAULT_IMAGE_SIZE,
+    resize_strategy: str = "resize",
 ) -> dict[str, np.ndarray | None]:
     """Load one DRIVE sample already prepared for model training/evaluation."""
 
     arrays = load_drive_sample(sample)
-    image = resize_array(arrays["image"], size=image_size, is_mask=False)
-    manual_1 = resize_array(arrays["manual_1"], size=image_size, is_mask=True)
-    fov_mask = resize_array(arrays["fov_mask"], size=image_size, is_mask=True)
+    image = preprocess_array(
+        arrays["image"],
+        image_size=image_size,
+        is_mask=False,
+        resize_strategy=resize_strategy,
+    )
+    manual_1 = preprocess_array(
+        arrays["manual_1"],
+        image_size=image_size,
+        is_mask=True,
+        resize_strategy=resize_strategy,
+    )
+    fov_mask = preprocess_array(
+        arrays["fov_mask"],
+        image_size=image_size,
+        is_mask=True,
+        resize_strategy=resize_strategy,
+    )
 
     manual_2 = None
     if arrays["manual_2"] is not None:
-        manual_2 = resize_array(arrays["manual_2"], size=image_size, is_mask=True)
+        manual_2 = preprocess_array(
+            arrays["manual_2"],
+            image_size=image_size,
+            is_mask=True,
+            resize_strategy=resize_strategy,
+        )
 
     return {
         "image": prepare_image(image),
@@ -219,6 +344,7 @@ def load_drive_arrays(
     samples: list[DriveSample],
     image_size: tuple[int, int] = DEFAULT_IMAGE_SIZE,
     target: str = "manual_1",
+    resize_strategy: str = "resize",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load multiple DRIVE samples into X and y arrays.
 
@@ -233,7 +359,11 @@ def load_drive_arrays(
     masks: list[np.ndarray] = []
 
     for sample in samples:
-        arrays = load_preprocessed_sample(sample, image_size=image_size)
+        arrays = load_preprocessed_sample(
+            sample,
+            image_size=image_size,
+            resize_strategy=resize_strategy,
+        )
         mask = arrays[target]
         if mask is None:
             raise ValueError(f"Sample {sample.sample_id} does not have {target}")

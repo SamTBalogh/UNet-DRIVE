@@ -170,6 +170,17 @@ aligned with the final DICE objective on imbalanced vessel masks. `batch-size 1`
 is the safer default for WSL2/GPU runs on limited VRAM; if memory is stable, try
 `--batch-size 2`.
 
+To avoid deforming DRIVE images into a square input, train with symmetric
+padding instead of resizing:
+
+```bash
+TF_GPU_ALLOCATOR=cuda_malloc_async TF_FORCE_GPU_ALLOW_GROWTH=true python src/train.py --folds 5 --epochs 80 --batch-size 1 --augment-flips --loss bce_dice --checkpoint-monitor val_loss --checkpoint-mode min --early-stopping-monitor val_loss --early-stopping-mode min --patience 12 --resize-strategy pad --output-dir outputs/models/cv_bce_dice_flips_valloss_pad
+```
+
+For DRIVE, `--resize-strategy pad` resolves the model input size to `592x576`
+with the default `--pad-multiple 16`. Metadata is saved next to each fold so
+evaluation, threshold tuning and ensemble scripts can infer the preprocessing.
+
 ## Check Saved Model Loading
 
 Before delivering or evaluating final models, verify that all saved `.keras`
@@ -213,6 +224,12 @@ To generate segmentations with an ensemble of the five cross-validation folds:
 
 ```bash
 python src/predict_ensemble.py --models-dir outputs/models/cv_bce_dice_flips_valloss --split test --threshold 0.50 --output-dir outputs/segmentations/final_ensemble_test --apply-fov
+```
+
+To create visual diagnostics for selected test images:
+
+```bash
+python src/diagnose_ensemble.py --models-dir outputs/models/cv_bce_dice_flips_valloss --split test --threshold 0.50 --output-dir outputs/figures/final_ensemble_diagnostics --apply-fov
 ```
 
 ## Evaluate with DICE
@@ -265,6 +282,13 @@ using the stored metadata:
 python src/tune_threshold_cv.py --models-dir outputs/models/cv_5folds --output-dir outputs/results/cv_5folds --apply-fov
 ```
 
+For padded models, use the same command shape; preprocessing is read from fold
+metadata:
+
+```bash
+python src/tune_threshold_cv.py --models-dir outputs/models/cv_bce_dice_flips_valloss_pad --output-dir outputs/results/cv_bce_dice_flips_valloss_pad --apply-fov
+```
+
 ## Project Structure
 
 ```text
@@ -281,6 +305,7 @@ src/
   ensemble.py          # shared ensemble inference helpers
   predict.py           # PNG segmentation generation
   predict_ensemble.py  # PNG generation with averaged fold probabilities
+  diagnose_ensemble.py # visual diagnostics for ensemble predictions
   evaluate.py          # DICE evaluation and CSV output
   evaluate_ensemble.py # DICE evaluation with averaged fold probabilities
   config.py            # shared default settings

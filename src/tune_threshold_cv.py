@@ -38,8 +38,15 @@ def parse_args() -> argparse.Namespace:
         default="0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.65,0.70",
         help="Comma-separated probability thresholds to evaluate.",
     )
-    parser.add_argument("--image-height", type=int, default=512, help="Model input height.")
-    parser.add_argument("--image-width", type=int, default=512, help="Model input width.")
+    parser.add_argument("--image-height", type=int, default=512, help="Fallback model input height.")
+    parser.add_argument("--image-width", type=int, default=512, help="Fallback model input width.")
+    parser.add_argument(
+        "--resize-strategy",
+        choices=("resize", "pad"),
+        default=None,
+        help="Preprocessing strategy. Defaults to metadata value when available.",
+    )
+    parser.add_argument("--pad-multiple", type=int, default=16, help="Pad multiple kept for metadata traceability.")
     parser.add_argument(
         "--device",
         choices=("cpu", "gpu", "auto"),
@@ -108,15 +115,28 @@ def dice_binary(y_true: np.ndarray, y_pred: np.ndarray, smooth: float = 1e-6) ->
     return (2.0 * intersection + smooth) / (denominator + smooth)
 
 
-def predict_probability_original_size(model, sample, image_size: tuple[int, int], apply_fov: bool) -> np.ndarray:
-    from data import binarize_mask, load_drive_sample, load_preprocessed_sample
+def predict_probability_original_size(
+    model,
+    sample,
+    image_size: tuple[int, int],
+    resize_strategy: str,
+    apply_fov: bool,
+) -> np.ndarray:
+    from data import binarize_mask, crop_array_from_padded, load_drive_sample, load_preprocessed_sample
 
-    preprocessed = load_preprocessed_sample(sample, image_size=image_size)
+    preprocessed = load_preprocessed_sample(
+        sample,
+        image_size=image_size,
+        resize_strategy=resize_strategy,
+    )
     original = load_drive_sample(sample)
     original_height, original_width = original["image"].shape[:2]
 
     probability = model.predict(preprocessed["image"][np.newaxis, ...], verbose=0)[0, ..., 0]
-    probability = resize_probability(probability, size=(original_height, original_width))
+    if resize_strategy == "pad":
+        probability = crop_array_from_padded(probability, original_size=(original_height, original_width))
+    else:
+        probability = resize_probability(probability, size=(original_height, original_width))
 
     if apply_fov:
         fov = binarize_mask(original["fov_mask"])
@@ -208,10 +228,12 @@ def tune_thresholds(args: argparse.Namespace) -> None:
     import metrics  # noqa: F401 - register custom dice_coef before load_model.
 
     thresholds = parse_thresholds(args.thresholds)
-    image_size = (args.image_height, args.image_width)
     models_dir = Path(args.models_dir)
     output_dir = Path(args.output_dir)
     fold_metadata = load_fold_metadata(models_dir)
+    resize_strategy, image_size = resolve_preprocessing(args, fold_metadata)
+    print(f"Preprocessing strategy: {resize_strategy}")
+    print(f"Model image size: {image_size}")
     samples = list_drive_samples(args.data_dir, split="training", require_manual_2=False)
 
     by_image_rows: list[dict] = []
@@ -232,6 +254,7 @@ def tune_thresholds(args: argparse.Namespace) -> None:
                 model=model,
                 sample=sample,
                 image_size=image_size,
+                resize_strategy=resize_strategy,
                 apply_fov=args.apply_fov,
             )
             positive_ratio_manual_1 = float(np.mean(manual_1 > 0))
@@ -271,6 +294,16 @@ def tune_thresholds(args: argparse.Namespace) -> None:
             f"(mean DICE={best['mean_cv_dice_manual_1']})"
         )
     print(f"Saved threshold search outputs to {output_dir}")
+
+
+def resolve_preprocessing(args: argparse.Namespace, fold_metadata: list[dict]) -> tuple[str, tuple[int, int]]:
+    first_metadata = fold_metadata[0]
+    resize_strategy = args.resize_strategy or first_metadata.get("resize_strategy", "resize")
+    if "image_size" in first_metadata:
+        image_size = tuple(int(value) for value in first_metadata["image_size"])
+    else:
+        image_size = (args.image_height, args.image_width)
+    return resize_strategy, image_size
 
 
 def main() -> None:

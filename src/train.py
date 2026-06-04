@@ -20,7 +20,7 @@ from config import (
     OUTPUTS_DIR,
     RANDOM_SEED,
 )
-from data import load_drive_arrays, list_drive_samples
+from data import load_drive_arrays, list_drive_samples, resolve_preprocessed_image_size
 from metrics import bce_dice_loss, dice_coef, dice_loss
 from model import build_unet
 
@@ -29,7 +29,6 @@ def main() -> None:
     args = parse_args()
     keras.utils.set_random_seed(args.seed)
 
-    image_size = (args.image_height, args.image_width)
     samples = list_drive_samples(args.data_dir, split="training", require_manual_2=False)
     if args.max_samples:
         samples = samples[: args.max_samples]
@@ -37,7 +36,23 @@ def main() -> None:
     if len(samples) < 2:
         raise RuntimeError("At least two training samples are required.")
 
-    x, y = load_drive_arrays(samples, image_size=image_size, target="manual_1")
+    args.pad_multiple = max(args.pad_multiple, 2**args.depth)
+    image_size = resolve_preprocessed_image_size(
+        samples,
+        resize_strategy=args.resize_strategy,
+        image_size=(args.image_height, args.image_width),
+        pad_multiple=args.pad_multiple,
+    )
+    args.resolved_image_size = image_size
+    print(f"Preprocessing strategy: {args.resize_strategy}")
+    print(f"Model image size: {image_size}")
+
+    x, y = load_drive_arrays(
+        samples,
+        image_size=image_size,
+        target="manual_1",
+        resize_strategy=args.resize_strategy,
+    )
     print(f"Loaded X={x.shape} y={y.shape}")
     print(f"Image range: {x.min():.3f} to {x.max():.3f}")
     print(f"Mask values: {np.unique(y).tolist()}")
@@ -62,6 +77,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=str(OUTPUTS_DIR / "models"), help="Where to save models and histories.")
     parser.add_argument("--image-height", type=int, default=IMAGE_SIZE[0], help="Model input height.")
     parser.add_argument("--image-width", type=int, default=IMAGE_SIZE[1], help="Model input width.")
+    parser.add_argument(
+        "--resize-strategy",
+        choices=("resize", "pad"),
+        default="resize",
+        help="Preprocessing strategy. 'pad' keeps aspect ratio and pads to --pad-multiple.",
+    )
+    parser.add_argument("--pad-multiple", type=int, default=16, help="Pad image dimensions to this multiple.")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help="Maximum epochs.")
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Training batch size.")
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE, help="Adam learning rate.")
@@ -241,6 +263,9 @@ def save_fold_metadata(
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "loss": args.loss,
+        "image_size": list(args.resolved_image_size),
+        "resize_strategy": args.resize_strategy,
+        "pad_multiple": args.pad_multiple,
         "base_filters": args.base_filters,
         "depth": args.depth,
         "dropout": args.dropout,

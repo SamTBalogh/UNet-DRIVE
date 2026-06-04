@@ -10,19 +10,23 @@ import numpy as np
 from config import DATA_DIR, IMAGE_SIZE, OUTPUTS_DIR
 from data import binarize_mask, list_drive_samples, load_drive_sample
 from metrics import dice_score_numpy
-from predict import predict_sample_mask
+from predict import infer_resize_strategy_for_model, predict_sample_mask, resolve_model_image_size
 
 
 def main() -> None:
     args = parse_args()
-    image_size = (args.image_height, args.image_width)
 
     model = keras.models.load_model(args.model)
+    resize_strategy = infer_resize_strategy_for_model(args.model, requested=args.resize_strategy)
+    image_size = resolve_model_image_size(model, fallback=(args.image_height, args.image_width))
+    print(f"Preprocessing strategy: {resize_strategy}")
+    print(f"Model image size: {image_size}")
     samples = list_drive_samples(args.data_dir, split=args.split, require_manual_2=args.split == "test")
     rows = evaluate_samples(
         model=model,
         samples=samples,
         image_size=image_size,
+        resize_strategy=resize_strategy,
         threshold=args.threshold,
         apply_fov=args.apply_fov,
         model_name=Path(args.model).name,
@@ -44,6 +48,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default=str(OUTPUTS_DIR / "results" / "evaluation.csv"), help="CSV output path.")
     parser.add_argument("--image-height", type=int, default=IMAGE_SIZE[0], help="Model input height.")
     parser.add_argument("--image-width", type=int, default=IMAGE_SIZE[1], help="Model input width.")
+    parser.add_argument(
+        "--resize-strategy",
+        choices=("resize", "pad"),
+        default=None,
+        help="Preprocessing strategy. Defaults to sibling metadata value when available.",
+    )
     parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for vessel pixels.")
     parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside the DRIVE FoV mask to background.")
     return parser.parse_args()
@@ -53,6 +63,7 @@ def evaluate_samples(
     model: keras.Model,
     samples: list,
     image_size: tuple[int, int],
+    resize_strategy: str,
     threshold: float,
     apply_fov: bool,
     model_name: str,
@@ -64,6 +75,7 @@ def evaluate_samples(
             model=model,
             sample=sample,
             image_size=image_size,
+            resize_strategy=resize_strategy,
             threshold=threshold,
             apply_fov=apply_fov,
         )
