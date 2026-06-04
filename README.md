@@ -233,6 +233,13 @@ python src/evaluate.py --model outputs/models/cv_5folds/fold_1.keras --split tes
 For a rigorous final report, choose thresholds using validation data rather than
 tuning directly on the test set.
 
+For the saved 5-fold models, tune thresholds on each fold's validation split
+using the stored metadata:
+
+```bash
+python src/tune_threshold_cv.py --models-dir outputs/models/cv_5folds --output-dir outputs/results/cv_5folds --apply-fov
+```
+
 ## Project Structure
 
 ```text
@@ -245,6 +252,7 @@ src/
   augment.py           # synchronized flip augmentation
   train.py             # pilot training and K-fold training
   check_model_load.py  # Keras 3 saved-model loading check
+  tune_threshold_cv.py # threshold search on CV validation folds
   predict.py           # PNG segmentation generation
   evaluate.py          # DICE evaluation and CSV output
   config.py            # shared default settings
