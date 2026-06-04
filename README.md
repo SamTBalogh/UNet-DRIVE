@@ -159,6 +159,27 @@ outputs/models/cv_5folds/fold_4.keras
 outputs/models/cv_5folds/fold_5.keras
 ```
 
+## Check Saved Model Loading
+
+Before delivering or evaluating final models, verify that all saved `.keras`
+files can be loaded with Keras 3:
+
+```bash
+python src/check_model_load.py --models-dir outputs/models/cv_5folds
+```
+
+This check defaults to CPU so it does not consume GPU memory in WSL2. If you
+explicitly want to inspect GPU visibility, use:
+
+```bash
+python src/check_model_load.py --models-dir outputs/models/cv_5folds --device gpu --cuda-malloc-async
+```
+
+The current models were compiled with the custom `dice_coef` metric. They load
+after importing `metrics.py`, and they also load with `compile=False`. A clean
+plain `load_model(path)` without importing project metrics is expected to fail
+for these compiled models.
+
 ## Generate PNG Segmentations
 
 Example using one trained fold:
@@ -223,6 +244,7 @@ src/
   model.py             # configurable U-Net
   augment.py           # synchronized flip augmentation
   train.py             # pilot training and K-fold training
+  check_model_load.py  # Keras 3 saved-model loading check
   predict.py           # PNG segmentation generation
   evaluate.py          # DICE evaluation and CSV output
   config.py            # shared default settings
@@ -258,4 +280,3 @@ TensorFlow GPU support is not available on native Windows for TensorFlow >= 2.11
 
 This means TensorFlow is likely training on CPU. For long 5-fold training runs,
 WSL2 is recommended if an NVIDIA GPU is available.
-

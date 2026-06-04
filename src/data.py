@@ -133,10 +133,17 @@ def normalize_image(image: np.ndarray) -> np.ndarray:
 
 
 def binarize_mask(mask: np.ndarray, threshold: int | float = 127) -> np.ndarray:
-    """Convert a grayscale mask to a binary uint8 array with values 0 and 1."""
+    """Convert a grayscale mask to a binary uint8 array with values 0 and 1.
+
+    DRIVE masks can appear as either 0/255 images or already-binary 0/1
+    images, depending on the folder/source file. Treat 0/1 masks as binary
+    directly instead of applying a 127 threshold that would erase all vessels.
+    """
 
     if mask.ndim == 3:
         mask = mask[..., 0]
+    if mask.size and np.nanmax(mask) <= 1:
+        return (mask > 0).astype(np.uint8)
     return (mask > threshold).astype(np.uint8)
 
 
