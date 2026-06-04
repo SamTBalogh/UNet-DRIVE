@@ -21,7 +21,7 @@ from config import (
     RANDOM_SEED,
 )
 from data import load_drive_arrays, list_drive_samples
-from metrics import dice_coef
+from metrics import bce_dice_loss, dice_coef, dice_loss
 from model import build_unet
 
 
@@ -65,6 +65,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help="Maximum epochs.")
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Training batch size.")
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE, help="Adam learning rate.")
+    parser.add_argument(
+        "--loss",
+        choices=("bce", "dice", "bce_dice"),
+        default="bce",
+        help="Training loss. Use bce_dice for the next real experiment.",
+    )
     parser.add_argument("--folds", type=int, default=DEFAULT_FOLDS, help="Use 5 for cross-validation, 1 for a simple split.")
     parser.add_argument("--validation-size", type=float, default=0.2, help="Validation fraction when --folds 1.")
     parser.add_argument("--base-filters", type=int, default=16, help="Initial number of U-Net filters.")
@@ -86,10 +92,20 @@ def compile_model(image_size: tuple[int, int], args: argparse.Namespace) -> kera
     )
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=args.learning_rate),
-        loss="binary_crossentropy",
+        loss=select_loss(args.loss),
         metrics=[dice_coef],
     )
     return model
+
+
+def select_loss(loss_name: str):
+    if loss_name == "bce":
+        return "binary_crossentropy"
+    if loss_name == "dice":
+        return dice_loss
+    if loss_name == "bce_dice":
+        return bce_dice_loss
+    raise ValueError(f"Unsupported loss: {loss_name}")
 
 
 def train_single_split(
@@ -219,6 +235,7 @@ def save_fold_metadata(
         "epochs": args.epochs,
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
+        "loss": args.loss,
         "base_filters": args.base_filters,
         "depth": args.depth,
         "dropout": args.dropout,

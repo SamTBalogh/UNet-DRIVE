@@ -159,6 +159,17 @@ outputs/models/cv_5folds/fold_4.keras
 outputs/models/cv_5folds/fold_5.keras
 ```
 
+Next recommended experiment after the `cv_5folds` baseline:
+
+```bash
+TF_GPU_ALLOCATOR=cuda_malloc_async python src/train.py --folds 5 --epochs 60 --batch-size 1 --augment-flips --loss bce_dice --output-dir outputs/models/cv_bce_dice
+```
+
+`--loss bce_dice` combines binary cross-entropy with Dice loss, which is more
+aligned with the final DICE objective on imbalanced vessel masks. `batch-size 1`
+is the safer default for WSL2/GPU runs on limited VRAM; if memory is stable, try
+`--batch-size 2`.
+
 ## Check Saved Model Loading
 
 Before delivering or evaluating final models, verify that all saved `.keras`

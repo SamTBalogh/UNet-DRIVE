@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from keras import ops, saving
+from keras import losses, ops, saving
 
 
 def dice_score_numpy(
@@ -39,3 +39,11 @@ def dice_loss(y_true, y_pred):
     """Loss derived from soft DICE."""
 
     return 1.0 - dice_coef(y_true, y_pred)
+
+
+@saving.register_keras_serializable(package="DriveUNet")
+def bce_dice_loss(y_true, y_pred):
+    """Binary cross-entropy plus Dice loss for imbalanced vessel masks."""
+
+    bce = losses.binary_crossentropy(y_true, y_pred)
+    return ops.mean(bce) + dice_loss(y_true, y_pred)
