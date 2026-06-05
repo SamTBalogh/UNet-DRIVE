@@ -192,6 +192,30 @@ TF_GPU_ALLOCATOR=cuda_malloc_async TF_FORCE_GPU_ALLOW_GROWTH=true python src/tra
 mask, plus image-only brightness, contrast, gamma and light noise changes. Masks
 are transformed with nearest-neighbor interpolation and re-binarized.
 
+## Balanced Patch Training
+
+The next higher-potential experiment after error analysis is balanced patch
+training. It trains the same U-Net on sampled `128x128` patches instead of full
+images, with batches biased toward vessel, thin-vessel and low-vessel patches.
+The split is still done by original image before patch extraction, so validation
+patches never come from training images.
+
+Recommended first full run:
+
+```bash
+TF_GPU_ALLOCATOR=cuda_malloc_async TF_FORCE_GPU_ALLOW_GROWTH=true python src/train_patches.py --folds 5 --patch-size 128 --candidate-stride 16 --patches-per-image 512 --val-patches-per-image 256 --batch-size 8 --epochs 120 --augment-flips --augment-rich --loss bce_dice --checkpoint-monitor val_loss --checkpoint-mode min --early-stopping-monitor val_loss --early-stopping-mode min --patience 16 --output-dir outputs/models/cv_bce_dice_patch128_balanced
+```
+
+Run a fast dry run before training on a new machine:
+
+```bash
+python src/train_patches.py --dry-run --max-samples 2 --folds 1 --patch-size 64 --candidate-stride 32 --patches-per-image 8 --val-patches-per-image 4 --batch-size 2 --base-filters 4 --depth 2 --augment-flips --augment-rich --output-dir outputs/models/patch_dry_run
+```
+
+Patch-trained models require sliding-window inference for full-image evaluation.
+Do not evaluate them with `evaluate_ensemble.py`; implement or use the patch
+ensemble evaluation script in the next phase.
+
 ## Check Saved Model Loading
 
 Before delivering or evaluating final models, verify that all saved `.keras`
