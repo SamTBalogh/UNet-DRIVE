@@ -181,6 +181,17 @@ For DRIVE, `--resize-strategy pad` resolves the model input size to `592x576`
 with the default `--pad-multiple 16`. Metadata is saved next to each fold so
 evaluation, threshold tuning and ensemble scripts can infer the preprocessing.
 
+After the padded 120-epoch ensemble, the next controlled improvement is richer
+augmentation while keeping the rest of the experiment fixed:
+
+```bash
+TF_GPU_ALLOCATOR=cuda_malloc_async TF_FORCE_GPU_ALLOW_GROWTH=true python src/train.py --folds 5 --epochs 120 --batch-size 1 --augment-flips --augment-rich --augment-rich-copies 2 --loss bce_dice --checkpoint-monitor val_loss --checkpoint-mode min --early-stopping-monitor val_loss --early-stopping-mode min --patience 16 --resize-strategy pad --output-dir outputs/models/cv_bce_dice_flips_valloss_pad_e120_aug
+```
+
+`--augment-rich` adds synchronized small rotations and translations to image and
+mask, plus image-only brightness, contrast, gamma and light noise changes. Masks
+are transformed with nearest-neighbor interpolation and re-binarized.
+
 ## Check Saved Model Loading
 
 Before delivering or evaluating final models, verify that all saved `.keras`
@@ -298,7 +309,7 @@ src/
   metrics.py           # DICE metrics and Dice loss
   check_metrics.py     # artificial-mask metric test
   model.py             # configurable U-Net
-  augment.py           # synchronized flip augmentation
+  augment.py           # synchronized flip and richer augmentation
   train.py             # pilot training and K-fold training
   check_model_load.py  # Keras 3 saved-model loading check
   tune_threshold_cv.py # threshold search on CV validation folds

@@ -9,7 +9,7 @@ import keras
 import numpy as np
 from sklearn.model_selection import KFold, train_test_split
 
-from augment import add_flip_augmentations
+from augment import add_flip_augmentations, add_rich_augmentations
 from config import (
     DATA_DIR,
     DEFAULT_BATCH_SIZE,
@@ -102,6 +102,53 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Random seed.")
     parser.add_argument("--dry-run", action="store_true", help="Load data and build the model without training.")
     parser.add_argument("--augment-flips", action="store_true", help="Add synchronized flip augmentations to training folds.")
+    parser.add_argument(
+        "--augment-rich",
+        action="store_true",
+        help="Add synchronized rotation/shift plus image-only photometric augmentations.",
+    )
+    parser.add_argument(
+        "--augment-rich-copies",
+        type=int,
+        default=2,
+        help="Number of rich augmented copies added per current training sample.",
+    )
+    parser.add_argument(
+        "--augment-rotation-degrees",
+        type=float,
+        default=12.0,
+        help="Maximum absolute random rotation used by --augment-rich.",
+    )
+    parser.add_argument(
+        "--augment-shift-pixels",
+        type=int,
+        default=16,
+        help="Maximum absolute vertical/horizontal shift used by --augment-rich.",
+    )
+    parser.add_argument(
+        "--augment-brightness",
+        type=float,
+        default=0.15,
+        help="Brightness factor range used by --augment-rich: 1 +/- value.",
+    )
+    parser.add_argument(
+        "--augment-contrast",
+        type=float,
+        default=0.15,
+        help="Contrast factor range used by --augment-rich: 1 +/- value.",
+    )
+    parser.add_argument(
+        "--augment-gamma",
+        type=float,
+        default=0.15,
+        help="Gamma range used by --augment-rich: 1 +/- value.",
+    )
+    parser.add_argument(
+        "--augment-noise-std",
+        type=float,
+        default=0.01,
+        help="Maximum Gaussian noise std sampled by --augment-rich.",
+    )
     parser.add_argument("--checkpoint-monitor", default="val_dice_coef", help="Metric monitored by ModelCheckpoint.")
     parser.add_argument("--checkpoint-mode", choices=("min", "max", "auto"), default="max", help="ModelCheckpoint mode.")
     parser.add_argument("--early-stopping-monitor", default="val_dice_coef", help="Metric monitored by EarlyStopping.")
@@ -193,6 +240,24 @@ def train_one_fold(
     if args.augment_flips:
         x_train, y_train = add_flip_augmentations(x_train, y_train)
         print(f"After flip augmentation: {len(x_train)} training samples")
+    if args.augment_rich:
+        x_train, y_train = add_rich_augmentations(
+            x_train,
+            y_train,
+            copies=args.augment_rich_copies,
+            seed=fold_seed(args.seed, fold_name),
+            rotation_degrees=args.augment_rotation_degrees,
+            shift_pixels=args.augment_shift_pixels,
+            brightness_delta=args.augment_brightness,
+            contrast_delta=args.augment_contrast,
+            gamma_delta=args.augment_gamma,
+            noise_std=args.augment_noise_std,
+        )
+        print(
+            "After rich augmentation: "
+            f"{len(x_train)} training samples "
+            f"({args.augment_rich_copies} extra copies per input)"
+        )
 
     model_path = output_dir / f"{fold_name}.keras"
     callbacks = [
@@ -270,6 +335,14 @@ def save_fold_metadata(
         "depth": args.depth,
         "dropout": args.dropout,
         "augment_flips": args.augment_flips,
+        "augment_rich": args.augment_rich,
+        "augment_rich_copies": args.augment_rich_copies,
+        "augment_rotation_degrees": args.augment_rotation_degrees,
+        "augment_shift_pixels": args.augment_shift_pixels,
+        "augment_brightness": args.augment_brightness,
+        "augment_contrast": args.augment_contrast,
+        "augment_gamma": args.augment_gamma,
+        "augment_noise_std": args.augment_noise_std,
         "checkpoint_monitor": args.checkpoint_monitor,
         "checkpoint_mode": args.checkpoint_mode,
         "early_stopping_monitor": args.early_stopping_monitor,
@@ -278,6 +351,12 @@ def save_fold_metadata(
         "seed": args.seed,
     }
     output_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+
+def fold_seed(seed: int, fold_name: str) -> int:
+    """Derive a deterministic augmentation seed per fold."""
+
+    return seed + sum(ord(char) for char in fold_name)
 
 
 if __name__ == "__main__":
