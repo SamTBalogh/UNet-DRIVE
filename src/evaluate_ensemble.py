@@ -38,6 +38,7 @@ def main() -> None:
         resize_strategy=resize_strategy,
         threshold=args.threshold,
         apply_fov=args.apply_fov,
+        tta=args.tta,
         ensemble_name=args.ensemble_name,
     )
 
@@ -52,6 +53,7 @@ def main() -> None:
     print(f"Loaded {len(models)} models: {', '.join(model_names)}")
     print(f"Preprocessing strategy: {resize_strategy}")
     print(f"Model image size: {image_size}")
+    print(f"TTA: {'enabled' if args.tta else 'disabled'}")
     print(f"Saved evaluation to {output_path}")
     print(f"Saved summary to {summary_path}")
     print(f"Mean DICE: {np.mean(dice_values):.4f}")
@@ -89,6 +91,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for vessel pixels.")
     parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside the DRIVE FoV to background.")
     parser.add_argument(
+        "--tta",
+        action="store_true",
+        help="Average original, horizontal flip, vertical flip and both-flip predictions before thresholding.",
+    )
+    parser.add_argument(
         "--device",
         choices=("cpu", "gpu", "auto"),
         default="cpu",
@@ -110,6 +117,7 @@ def evaluate_samples(
     resize_strategy: str,
     threshold: float,
     apply_fov: bool,
+    tta: bool,
     ensemble_name: str,
 ) -> list[dict[str, str | float]]:
     rows = []
@@ -122,6 +130,7 @@ def evaluate_samples(
             image_size=image_size,
             resize_strategy=resize_strategy,
             apply_fov=apply_fov,
+            tta=tta,
         )
         prediction = probability_to_binary_mask(probability, threshold=threshold)
 

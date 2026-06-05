@@ -272,6 +272,22 @@ python src/evaluate_ensemble.py --models-dir outputs/models/cv_bce_dice_flips_va
 
 The ensemble script also writes a summary CSV next to the per-image results.
 
+To test reversible TTA on the current best ensemble, add `--tta`. This predicts
+the original image, horizontal flip, vertical flip and both flips, reverses each
+flipped probability map, averages the four probabilities per fold, and then
+averages the folds before thresholding:
+
+```bash
+python src/evaluate_ensemble.py --models-dir outputs/models/cv_bce_dice_flips_valloss_pad_e120_aug --split test --threshold 0.45 --output outputs/results/cv_bce_dice_flips_valloss_pad_e120_aug/ensemble_test_t045_tta.csv --ensemble-name cv_bce_dice_flips_valloss_pad_e120_aug_ensemble_tta --apply-fov --tta
+```
+
+Use the same flag for TTA segmentations or diagnostics:
+
+```bash
+python src/predict_ensemble.py --models-dir outputs/models/cv_bce_dice_flips_valloss_pad_e120_aug --split test --threshold 0.45 --output-dir outputs/segmentations/final_ensemble_test_pad_e120_aug_tta --apply-fov --tta
+python src/diagnose_ensemble.py --models-dir outputs/models/cv_bce_dice_flips_valloss_pad_e120_aug --split test --threshold 0.45 --output-dir outputs/figures/final_ensemble_diagnostics_pad_e120_aug_tta --apply-fov --tta
+```
+
 ## Threshold Experiments
 
 The default threshold is `0.5`. To compare thresholds:
@@ -292,6 +308,8 @@ using the stored metadata:
 ```bash
 python src/tune_threshold_cv.py --models-dir outputs/models/cv_5folds --output-dir outputs/results/cv_5folds --apply-fov
 ```
+
+Add `--tta` to repeat the same validation-threshold search with reversible TTA.
 
 For padded models, use the same command shape; preprocessing is read from fold
 metadata:

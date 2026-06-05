@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force probabilities outside the DRIVE FoV mask to background before thresholding.",
     )
+    parser.add_argument(
+        "--tta",
+        action="store_true",
+        help="Average original, horizontal flip, vertical flip and both-flip predictions before thresholding.",
+    )
     return parser.parse_args()
 
 
@@ -121,8 +126,10 @@ def predict_probability_original_size(
     image_size: tuple[int, int],
     resize_strategy: str,
     apply_fov: bool,
+    tta: bool = False,
 ) -> np.ndarray:
     from data import binarize_mask, crop_array_from_padded, load_drive_sample, load_preprocessed_sample
+    from ensemble import predict_model_probability
 
     preprocessed = load_preprocessed_sample(
         sample,
@@ -132,7 +139,11 @@ def predict_probability_original_size(
     original = load_drive_sample(sample)
     original_height, original_width = original["image"].shape[:2]
 
-    probability = model.predict(preprocessed["image"][np.newaxis, ...], verbose=0)[0, ..., 0]
+    probability = predict_model_probability(
+        model,
+        batch=preprocessed["image"][np.newaxis, ...],
+        tta=tta,
+    )
     if resize_strategy == "pad":
         probability = crop_array_from_padded(probability, original_size=(original_height, original_width))
     else:
@@ -234,6 +245,7 @@ def tune_thresholds(args: argparse.Namespace) -> None:
     resize_strategy, image_size = resolve_preprocessing(args, fold_metadata)
     print(f"Preprocessing strategy: {resize_strategy}")
     print(f"Model image size: {image_size}")
+    print(f"TTA: {'enabled' if args.tta else 'disabled'}")
     samples = list_drive_samples(args.data_dir, split="training", require_manual_2=False)
 
     by_image_rows: list[dict] = []
@@ -256,6 +268,7 @@ def tune_thresholds(args: argparse.Namespace) -> None:
                 image_size=image_size,
                 resize_strategy=resize_strategy,
                 apply_fov=args.apply_fov,
+                tta=args.tta,
             )
             positive_ratio_manual_1 = float(np.mean(manual_1 > 0))
 

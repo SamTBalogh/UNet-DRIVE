@@ -18,6 +18,9 @@ from data import (
 )
 
 
+TTA_TRANSFORMS = ("identity", "flip_h", "flip_v", "flip_hv")
+
+
 def configure_inference_environment(device: str = "cpu", cuda_malloc_async: bool = False) -> None:
     """Configure TensorFlow-related environment variables before importing Keras."""
 
@@ -76,6 +79,7 @@ def predict_ensemble_probability(
     image_size: tuple[int, int] = IMAGE_SIZE,
     resize_strategy: str = "resize",
     apply_fov: bool = False,
+    tta: bool = False,
 ) -> np.ndarray:
     """Average model probabilities and return them in the original image size."""
 
@@ -90,7 +94,7 @@ def predict_ensemble_probability(
 
     probabilities = []
     for model in models:
-        probability = model.predict(batch, verbose=0)[0, ..., 0]
+        probability = predict_model_probability(model, batch=batch, tta=tta)
         if resize_strategy == "pad":
             probability = crop_array_from_padded(probability, original_size=(original_height, original_width))
         else:
@@ -102,6 +106,48 @@ def predict_ensemble_probability(
         fov = binarize_mask(original["fov_mask"])
         ensemble_probability = ensemble_probability * fov.astype(np.float32)
     return ensemble_probability
+
+
+def predict_model_probability(model: Any, batch: np.ndarray, tta: bool = False) -> np.ndarray:
+    """Predict one model probability map, optionally averaging reversible flip TTA."""
+
+    if not tta:
+        return model.predict(batch, verbose=0)[0, ..., 0].astype(np.float32)
+
+    probabilities = []
+    for transform in TTA_TRANSFORMS:
+        transformed_batch = apply_tta_transform(batch, transform)
+        probability = model.predict(transformed_batch, verbose=0)[0, ..., 0]
+        probabilities.append(invert_tta_probability(probability, transform))
+    return np.mean(np.stack(probabilities, axis=0), axis=0).astype(np.float32)
+
+
+def apply_tta_transform(batch: np.ndarray, transform: str) -> np.ndarray:
+    """Apply a reversible TTA transform to a NHWC batch."""
+
+    if transform == "identity":
+        return batch
+    if transform == "flip_h":
+        return np.ascontiguousarray(np.flip(batch, axis=2))
+    if transform == "flip_v":
+        return np.ascontiguousarray(np.flip(batch, axis=1))
+    if transform == "flip_hv":
+        return np.ascontiguousarray(np.flip(batch, axis=(1, 2)))
+    raise ValueError(f"Unknown TTA transform: {transform}")
+
+
+def invert_tta_probability(probability: np.ndarray, transform: str) -> np.ndarray:
+    """Map a TTA probability prediction back to the original orientation."""
+
+    if transform == "identity":
+        return probability.astype(np.float32)
+    if transform == "flip_h":
+        return np.flip(probability, axis=1).astype(np.float32)
+    if transform == "flip_v":
+        return np.flip(probability, axis=0).astype(np.float32)
+    if transform == "flip_hv":
+        return np.flip(probability, axis=(0, 1)).astype(np.float32)
+    raise ValueError(f"Unknown TTA transform: {transform}")
 
 
 def probability_to_binary_mask(probability: np.ndarray, threshold: float) -> np.ndarray:

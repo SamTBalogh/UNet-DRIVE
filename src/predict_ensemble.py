@@ -33,6 +33,7 @@ def main() -> None:
     print(f"Loaded {len(models)} models: {', '.join(path.name for path in model_paths)}")
     print(f"Preprocessing strategy: {resize_strategy}")
     print(f"Model image size: {image_size}")
+    print(f"TTA: {'enabled' if args.tta else 'disabled'}")
     for sample in samples:
         probability = predict_ensemble_probability(
             models=models,
@@ -40,6 +41,7 @@ def main() -> None:
             image_size=image_size,
             resize_strategy=resize_strategy,
             apply_fov=args.apply_fov,
+            tta=args.tta,
         )
         mask = probability_to_binary_mask(probability, threshold=args.threshold)
         output_path = output_dir / f"{sample.sample_id}_{args.split}_segmentation.png"
@@ -72,6 +74,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for vessel pixels.")
     parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside the DRIVE FoV to background.")
+    parser.add_argument(
+        "--tta",
+        action="store_true",
+        help="Average original, horizontal flip, vertical flip and both-flip predictions before thresholding.",
+    )
     parser.add_argument(
         "--device",
         choices=("cpu", "gpu", "auto"),

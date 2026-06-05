@@ -39,6 +39,7 @@ def main() -> None:
     print(f"Loaded {len(models)} models: {', '.join(path.name for path in model_paths)}")
     print(f"Preprocessing strategy: {resize_strategy}")
     print(f"Model image size: {image_size}")
+    print(f"TTA: {'enabled' if args.tta else 'disabled'}")
     print(f"Generating diagnostics for {len(samples)} samples")
 
     for sample in samples:
@@ -50,6 +51,7 @@ def main() -> None:
             resize_strategy=resize_strategy,
             threshold=args.threshold,
             apply_fov=args.apply_fov,
+            tta=args.tta,
             error_reference=args.error_reference,
             error_dilation=args.error_dilation,
             output_path=output_path,
@@ -82,6 +84,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for vessel pixels.")
     parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside the DRIVE FoV to background.")
+    parser.add_argument(
+        "--tta",
+        action="store_true",
+        help="Average original, horizontal flip, vertical flip and both-flip predictions before thresholding.",
+    )
     parser.add_argument(
         "--sample-ids",
         default="01,03,07,14,20",
@@ -141,6 +148,7 @@ def create_diagnostic_figure(
     resize_strategy: str,
     threshold: float,
     apply_fov: bool,
+    tta: bool,
     error_reference: str,
     error_dilation: int,
     output_path: Path,
@@ -156,6 +164,7 @@ def create_diagnostic_figure(
         image_size=image_size,
         resize_strategy=resize_strategy,
         apply_fov=apply_fov,
+        tta=tta,
     )
     prediction = probability_to_binary_mask(probability, threshold=threshold)
 
@@ -170,6 +179,8 @@ def create_diagnostic_figure(
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8), constrained_layout=True)
     title = f"Sample {sample.sample_id} - threshold {threshold:.2f}"
+    if tta:
+        title += " - TTA"
     if dice_2 is None:
         title += f" - DICE exp1 {dice_1:.3f}"
     else:
