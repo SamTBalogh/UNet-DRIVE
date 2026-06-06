@@ -241,11 +241,32 @@ nearly equivalent (`0.832503151894` test mean DICE total).
 The conservative connected-component postprocessing experiment was validated on
 CV and was not adopted: it improved validation by only `+0.000103` DICE and
 reduced test DICE to `0.832022504508`. The next controlled experiment should be
-a thin-vessel-oriented loss:
+a thin-vessel-oriented loss. The training CLI now supports:
 
-- weighted BCE + Dice;
-- Focal/Tversky;
-- a Dice variant with a thin-vessel proxy weight.
+- `--loss weighted_bce_dice`: positive-pixel weighted BCE + Dice;
+- `--loss focal_tversky`: Focal Tversky with higher false-negative penalty;
+- `--loss thin_weighted_dice`: Dice weighted by a local thin-vessel proxy.
+
+Recommended first thin-vessel loss run:
+
+```bash
+TF_GPU_ALLOCATOR=cuda_malloc_async TF_FORCE_GPU_ALLOW_GROWTH=true python src/train_patches.py --folds 5 --patch-size 128 --candidate-stride 16 --patches-per-image 512 --val-patches-per-image 256 --batch-size 8 --epochs 120 --augment-flips --augment-rich --loss focal_tversky --checkpoint-monitor val_loss --checkpoint-mode min --early-stopping-monitor val_loss --early-stopping-mode min --patience 16 --output-dir outputs/models/cv_focal_tversky_patch128_balanced
+```
+
+Alternative controlled runs, changing only the loss:
+
+```bash
+TF_GPU_ALLOCATOR=cuda_malloc_async TF_FORCE_GPU_ALLOW_GROWTH=true python src/train_patches.py --folds 5 --patch-size 128 --candidate-stride 16 --patches-per-image 512 --val-patches-per-image 256 --batch-size 8 --epochs 120 --augment-flips --augment-rich --loss weighted_bce_dice --checkpoint-monitor val_loss --checkpoint-mode min --early-stopping-monitor val_loss --early-stopping-mode min --patience 16 --output-dir outputs/models/cv_weighted_bce_dice_patch128_balanced
+TF_GPU_ALLOCATOR=cuda_malloc_async TF_FORCE_GPU_ALLOW_GROWTH=true python src/train_patches.py --folds 5 --patch-size 128 --candidate-stride 16 --patches-per-image 512 --val-patches-per-image 256 --batch-size 8 --epochs 120 --augment-flips --augment-rich --loss thin_weighted_dice --checkpoint-monitor val_loss --checkpoint-mode min --early-stopping-monitor val_loss --early-stopping-mode min --patience 16 --output-dir outputs/models/cv_thin_weighted_dice_patch128_balanced
+```
+
+After each trained CV run, tune threshold on validation only and evaluate test
+once with the selected CV configuration:
+
+```bash
+python src/tune_threshold_patch_cv.py --models-dir outputs/models/cv_focal_tversky_patch128_balanced --output-dir outputs/results/cv_focal_tversky_patch128_balanced_stride32_tta --apply-fov --tta --stride 32 --predict-batch-size 32
+python src/evaluate_patch_ensemble.py --models-dir outputs/models/cv_focal_tversky_patch128_balanced --split test --threshold <cv_threshold> --output outputs/results/cv_focal_tversky_patch128_balanced_stride32_tta/patch_ensemble_test_stride32_tta.csv --ensemble-name cv_focal_tversky_patch128_balanced_ensemble_stride32_tta --apply-fov --tta --stride 32 --predict-batch-size 32
+```
 
 ## Check Saved Model Loading
 

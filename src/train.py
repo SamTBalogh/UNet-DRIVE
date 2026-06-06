@@ -21,7 +21,14 @@ from config import (
     RANDOM_SEED,
 )
 from data import load_drive_arrays, list_drive_samples, resolve_preprocessed_image_size
-from metrics import bce_dice_loss, dice_coef, dice_loss
+from metrics import (
+    bce_dice_loss,
+    dice_coef,
+    dice_loss,
+    focal_tversky_loss,
+    thin_weighted_dice_loss,
+    weighted_bce_dice_loss,
+)
 from model import build_unet
 
 
@@ -89,9 +96,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE, help="Adam learning rate.")
     parser.add_argument(
         "--loss",
-        choices=("bce", "dice", "bce_dice"),
+        choices=(
+            "bce",
+            "dice",
+            "bce_dice",
+            "weighted_bce_dice",
+            "focal_tversky",
+            "thin_weighted_dice",
+        ),
         default="bce",
-        help="Training loss. Use bce_dice for the next real experiment.",
+        help="Training loss. Thin-vessel experiments should use weighted_bce_dice, focal_tversky, or thin_weighted_dice.",
     )
     parser.add_argument("--folds", type=int, default=DEFAULT_FOLDS, help="Use 5 for cross-validation, 1 for a simple split.")
     parser.add_argument("--validation-size", type=float, default=0.2, help="Validation fraction when --folds 1.")
@@ -179,6 +193,12 @@ def select_loss(loss_name: str):
         return dice_loss
     if loss_name == "bce_dice":
         return bce_dice_loss
+    if loss_name == "weighted_bce_dice":
+        return weighted_bce_dice_loss
+    if loss_name == "focal_tversky":
+        return focal_tversky_loss
+    if loss_name == "thin_weighted_dice":
+        return thin_weighted_dice_loss
     raise ValueError(f"Unsupported loss: {loss_name}")
 
 
