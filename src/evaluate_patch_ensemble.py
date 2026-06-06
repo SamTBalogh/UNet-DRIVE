@@ -18,6 +18,7 @@ from patch_inference import (
     resolve_patch_size,
     resolve_stride,
 )
+from postprocess import remove_small_components
 
 
 def main() -> None:
@@ -43,6 +44,7 @@ def main() -> None:
         stride=stride,
         batch_size=args.predict_batch_size,
         threshold=args.threshold,
+        postprocess_min_size=args.postprocess_min_size,
         apply_fov=args.apply_fov,
         tta=args.tta,
         ensemble_name=args.ensemble_name,
@@ -60,6 +62,7 @@ def main() -> None:
     print(f"Stride: {stride}")
     print(f"Prediction batch size: {args.predict_batch_size}")
     print(f"TTA: {'enabled' if args.tta else 'disabled'}")
+    print(f"Postprocess min component size: {args.postprocess_min_size}")
     print(f"Saved evaluation to {output_path}")
     print(f"Saved summary to {summary_path}")
     print(f"Mean DICE: {np.mean(dice_values):.4f}")
@@ -86,6 +89,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stride", type=int, default=None, help="Sliding-window stride. Defaults to patch_size / 2.")
     parser.add_argument("--predict-batch-size", type=int, default=16, help="Patch prediction batch size.")
     parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for vessel pixels.")
+    parser.add_argument(
+        "--postprocess-min-size",
+        type=int,
+        default=0,
+        help="Minimum connected-component size to keep after thresholding. Use 0 for no postprocessing.",
+    )
     parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside DRIVE FoV to background.")
     parser.add_argument("--tta", action="store_true", help="Use reversible full-image flip TTA before thresholding.")
     parser.add_argument(
@@ -132,6 +141,7 @@ def evaluate_samples(
     stride: int,
     batch_size: int,
     threshold: float,
+    postprocess_min_size: int,
     apply_fov: bool,
     tta: bool,
     ensemble_name: str,
@@ -152,6 +162,12 @@ def evaluate_samples(
         prediction = probability_to_binary_mask(probability, threshold=threshold)
 
         arrays = load_drive_sample(sample)
+        fov = binarize_mask(arrays["fov_mask"]) if apply_fov else None
+        prediction = remove_small_components(
+            prediction,
+            min_size=postprocess_min_size,
+            fov_mask=fov,
+        )
         manual_1 = binarize_mask(arrays["manual_1"])
         dice_manual_1 = dice_score_numpy(manual_1, prediction, threshold=0.5)
         positive_ratio_manual_1 = float(np.mean(manual_1 > 0))
@@ -171,6 +187,7 @@ def evaluate_samples(
                 "model": ensemble_name,
                 "models": model_list,
                 "threshold": threshold,
+                "postprocess_min_size": postprocess_min_size,
                 "patch_size": patch_size,
                 "stride": stride,
                 "tta": tta,
@@ -192,6 +209,7 @@ def save_rows(rows: list[dict[str, str | float]], output_path: Path) -> None:
         "model",
         "models",
         "threshold",
+        "postprocess_min_size",
         "patch_size",
         "stride",
         "tta",
@@ -222,6 +240,7 @@ def summarize_rows(
         "model": ensemble_name,
         "models": ";".join(model_names),
         "threshold": rows[0]["threshold"] if rows else "",
+        "postprocess_min_size": rows[0]["postprocess_min_size"] if rows else "",
         "patch_size": rows[0]["patch_size"] if rows else "",
         "stride": rows[0]["stride"] if rows else "",
         "tta": rows[0]["tta"] if rows else "",
@@ -249,6 +268,7 @@ def save_summary(rows: list[dict[str, str | float]], output_path: Path) -> None:
         "model",
         "models",
         "threshold",
+        "postprocess_min_size",
         "patch_size",
         "stride",
         "tta",

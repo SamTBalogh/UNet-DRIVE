@@ -18,6 +18,7 @@ from patch_inference import (
     resolve_patch_size,
     resolve_stride,
 )
+from postprocess import remove_small_components
 
 
 def main() -> None:
@@ -52,6 +53,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--apply-fov", action="store_true", help="Force probabilities outside FoV to background.")
     parser.add_argument("--tta", action="store_true", help="Use reversible full-image flip TTA for validation.")
     parser.add_argument(
+        "--postprocess-min-sizes",
+        default="0",
+        help=(
+            "Comma-separated minimum connected-component sizes to keep after thresholding. "
+            "Use 0 for no postprocessing."
+        ),
+    )
+    parser.add_argument(
         "--max-validation-images",
         type=int,
         default=None,
@@ -71,6 +80,7 @@ def tune_thresholds(args: argparse.Namespace) -> None:
     import keras
 
     thresholds = parse_thresholds(args.thresholds)
+    postprocess_min_sizes = parse_postprocess_min_sizes(args.postprocess_min_sizes)
     models_dir = Path(args.models_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -95,7 +105,8 @@ def tune_thresholds(args: argparse.Namespace) -> None:
             validation_indices = validation_indices[: args.max_validation_images]
         print(
             f"Evaluating {fold_name}: {len(validation_indices)} validation images, "
-            f"patch_size={patch_size}, stride={stride}, TTA={'yes' if args.tta else 'no'}"
+            f"patch_size={patch_size}, stride={stride}, TTA={'yes' if args.tta else 'no'}, "
+            f"postprocess_min_sizes={postprocess_min_sizes}"
         )
 
         for sample_index in validation_indices:
@@ -113,28 +124,37 @@ def tune_thresholds(args: argparse.Namespace) -> None:
             if args.apply_fov:
                 fov = binarize_mask(arrays["fov_mask"])
                 probability = probability * fov.astype(np.float32)
+            else:
+                fov = None
 
             positive_ratio_manual_1 = float(np.mean(manual_1 > 0))
             for threshold in thresholds:
-                prediction = probability_to_binary_mask(probability, threshold=threshold)
-                by_image_rows.append(
-                    {
-                        "fold": fold_name,
-                        "model": model_path.name,
-                        "image_id": sample.sample_id,
-                        "sample_index": sample_index,
-                        "threshold": f"{threshold:.2f}",
-                        "patch_size": patch_size,
-                        "stride": stride,
-                        "tta": args.tta,
-                        "dice_manual_1": f"{dice_score_numpy(manual_1, prediction):.12f}",
-                        "positive_ratio_prediction": f"{float(np.mean(prediction > 0)):.12f}",
-                        "positive_ratio_manual_1": f"{positive_ratio_manual_1:.12f}",
-                        "probability_min": f"{float(np.min(probability)):.12f}",
-                        "probability_mean": f"{float(np.mean(probability)):.12f}",
-                        "probability_max": f"{float(np.max(probability)):.12f}",
-                    }
-                )
+                base_prediction = probability_to_binary_mask(probability, threshold=threshold)
+                for min_size in postprocess_min_sizes:
+                    prediction = remove_small_components(
+                        base_prediction,
+                        min_size=min_size,
+                        fov_mask=fov,
+                    )
+                    by_image_rows.append(
+                        {
+                            "fold": fold_name,
+                            "model": model_path.name,
+                            "image_id": sample.sample_id,
+                            "sample_index": sample_index,
+                            "threshold": f"{threshold:.2f}",
+                            "postprocess_min_size": min_size,
+                            "patch_size": patch_size,
+                            "stride": stride,
+                            "tta": args.tta,
+                            "dice_manual_1": f"{dice_score_numpy(manual_1, prediction):.12f}",
+                            "positive_ratio_prediction": f"{float(np.mean(prediction > 0)):.12f}",
+                            "positive_ratio_manual_1": f"{positive_ratio_manual_1:.12f}",
+                            "probability_min": f"{float(np.min(probability)):.12f}",
+                            "probability_mean": f"{float(np.mean(probability)):.12f}",
+                            "probability_max": f"{float(np.max(probability)):.12f}",
+                        }
+                    )
         clear_keras_session()
 
     by_fold_rows = summarize_by_fold(by_image_rows)
@@ -146,8 +166,9 @@ def tune_thresholds(args: argparse.Namespace) -> None:
     best = next((row for row in global_rows if row["is_best_threshold"] == "yes"), None)
     if best:
         print(
-            "Best validation threshold: "
-            f"{best['threshold']} "
+            "Best validation config: "
+            f"threshold={best['threshold']}, "
+            f"postprocess_min_size={best['postprocess_min_size']} "
             f"(mean DICE={best['mean_cv_dice_manual_1']})"
         )
     print(f"Saved threshold search outputs to {output_dir}")
@@ -160,13 +181,25 @@ def parse_thresholds(raw: str) -> list[float]:
     return thresholds
 
 
+def parse_postprocess_min_sizes(raw: str) -> list[int]:
+    sizes = [int(value.strip()) for value in raw.split(",") if value.strip()]
+    if not sizes:
+        raise ValueError("At least one postprocess minimum size is required.")
+    if any(size < 0 for size in sizes):
+        raise ValueError("Postprocess minimum sizes must be non-negative.")
+    return sorted(set(sizes))
+
+
 def summarize_by_fold(by_image_rows: list[dict]) -> list[dict]:
-    grouped: dict[tuple[str, str], list[dict]] = {}
+    grouped: dict[tuple[str, str, int], list[dict]] = {}
     for row in by_image_rows:
-        grouped.setdefault((row["fold"], row["threshold"]), []).append(row)
+        grouped.setdefault((row["fold"], row["threshold"], int(row["postprocess_min_size"])), []).append(row)
 
     summary = []
-    for (fold, threshold), rows in sorted(grouped.items(), key=lambda item: (item[0][0], float(item[0][1]))):
+    for (fold, threshold, min_size), rows in sorted(
+        grouped.items(),
+        key=lambda item: (item[0][0], float(item[0][1]), item[0][2]),
+    ):
         dice_values = np.asarray([float(row["dice_manual_1"]) for row in rows], dtype=np.float64)
         pred_ratios = np.asarray([float(row["positive_ratio_prediction"]) for row in rows], dtype=np.float64)
         summary.append(
@@ -174,6 +207,7 @@ def summarize_by_fold(by_image_rows: list[dict]) -> list[dict]:
                 "fold": fold,
                 "model": rows[0]["model"],
                 "threshold": threshold,
+                "postprocess_min_size": min_size,
                 "patch_size": rows[0]["patch_size"],
                 "stride": rows[0]["stride"],
                 "tta": rows[0]["tta"],
@@ -189,16 +223,17 @@ def summarize_by_fold(by_image_rows: list[dict]) -> list[dict]:
 
 
 def summarize_global(by_fold_rows: list[dict]) -> list[dict]:
-    grouped: dict[str, list[dict]] = {}
+    grouped: dict[tuple[str, int], list[dict]] = {}
     for row in by_fold_rows:
-        grouped.setdefault(row["threshold"], []).append(row)
+        grouped.setdefault((row["threshold"], int(row["postprocess_min_size"])), []).append(row)
 
     summary = []
-    for threshold, rows in sorted(grouped.items(), key=lambda item: float(item[0])):
+    for (threshold, min_size), rows in sorted(grouped.items(), key=lambda item: (float(item[0][0]), item[0][1])):
         fold_means = np.asarray([float(row["mean_dice_manual_1"]) for row in rows], dtype=np.float64)
         summary.append(
             {
                 "threshold": threshold,
+                "postprocess_min_size": min_size,
                 "n_folds": len(rows),
                 "patch_size": rows[0]["patch_size"],
                 "stride": rows[0]["stride"],

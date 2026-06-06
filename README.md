@@ -238,12 +238,14 @@ The stride 32 result is the maximum-quality configuration. If inference speed is
 more important, `cv_bce_dice_patch128_balanced_ensemble_tta` with stride 64 is
 nearly equivalent (`0.832503151894` test mean DICE total).
 
-Next controlled experiments should be run one at a time:
+The conservative connected-component postprocessing experiment was validated on
+CV and was not adopted: it improved validation by only `+0.000103` DICE and
+reduced test DICE to `0.832022504508`. The next controlled experiment should be
+a thin-vessel-oriented loss:
 
-- conservative connected-component postprocessing inside the FoV, validated on
-  CV before looking at test;
-- a thin-vessel-oriented loss such as weighted BCE + Dice, Focal/Tversky, or a
-  Dice variant with a thin-vessel proxy weight.
+- weighted BCE + Dice;
+- Focal/Tversky;
+- a Dice variant with a thin-vessel proxy weight.
 
 ## Check Saved Model Loading
 
@@ -385,6 +387,7 @@ validation:
 python src/tune_threshold_patch_cv.py --models-dir outputs/models/cv_bce_dice_patch128_balanced --output-dir outputs/results/cv_bce_dice_patch128_balanced --apply-fov --predict-batch-size 32
 python src/tune_threshold_patch_cv.py --models-dir outputs/models/cv_bce_dice_patch128_balanced --output-dir outputs/results/cv_bce_dice_patch128_balanced_tta --apply-fov --tta --predict-batch-size 32
 python src/tune_threshold_patch_cv.py --models-dir outputs/models/cv_bce_dice_patch128_balanced --output-dir outputs/results/cv_bce_dice_patch128_balanced_stride32_tta --apply-fov --tta --stride 32 --predict-batch-size 32
+python src/tune_threshold_patch_cv.py --models-dir outputs/models/cv_bce_dice_patch128_balanced --output-dir outputs/results/cv_bce_dice_patch128_balanced_stride32_tta_postprocess_cv --apply-fov --tta --stride 32 --predict-batch-size 32 --postprocess-min-sizes 0,2,4,8,16
 ```
 
 ## Project Structure
@@ -409,6 +412,7 @@ src/
   patches.py           # patch candidate extraction and balanced sampling
   train_patches.py     # balanced patch training
   patch_inference.py   # sliding-window patch inference helpers
+  postprocess.py       # connected-component mask postprocessing
   tune_threshold_patch_cv.py # threshold search for patch-trained CV folds
   evaluate_patch_ensemble.py # DICE evaluation for patch-trained ensembles
   predict_patch_ensemble.py  # PNG generation for patch-trained ensembles

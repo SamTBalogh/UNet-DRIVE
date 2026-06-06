@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from config import DATA_DIR, OUTPUTS_DIR
-from data import list_drive_samples
+from data import binarize_mask, list_drive_samples, load_drive_sample
 from ensemble import configure_inference_environment
 from patch_inference import (
     load_patch_metadata,
@@ -15,6 +15,7 @@ from patch_inference import (
     resolve_stride,
     save_binary_png,
 )
+from postprocess import remove_small_components
 
 
 def main() -> None:
@@ -39,6 +40,7 @@ def main() -> None:
     print(f"Stride: {stride}")
     print(f"Prediction batch size: {args.predict_batch_size}")
     print(f"TTA: {'enabled' if args.tta else 'disabled'}")
+    print(f"Postprocess min component size: {args.postprocess_min_size}")
     print(f"Generating {len(samples)} masks")
 
     for sample in samples:
@@ -52,6 +54,14 @@ def main() -> None:
             tta=args.tta,
         )
         mask = probability_to_binary_mask(probability, threshold=args.threshold)
+        if args.postprocess_min_size > 0:
+            arrays = load_drive_sample(sample)
+            fov = binarize_mask(arrays["fov_mask"]) if args.apply_fov else None
+            mask = remove_small_components(
+                mask,
+                min_size=args.postprocess_min_size,
+                fov_mask=fov,
+            )
         output_path = output_dir / f"{sample.sample_id}_{args.split}_segmentation.png"
         save_binary_png(mask, output_path)
         print(f"Saved {output_path}")
@@ -78,6 +88,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stride", type=int, default=None, help="Sliding-window stride. Defaults to patch_size / 2.")
     parser.add_argument("--predict-batch-size", type=int, default=16, help="Patch prediction batch size.")
     parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for vessel pixels.")
+    parser.add_argument(
+        "--postprocess-min-size",
+        type=int,
+        default=0,
+        help="Minimum connected-component size to keep after thresholding. Use 0 for no postprocessing.",
+    )
     parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside DRIVE FoV to background.")
     parser.add_argument("--tta", action="store_true", help="Use reversible full-image flip TTA before thresholding.")
     parser.add_argument(

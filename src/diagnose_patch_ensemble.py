@@ -17,6 +17,7 @@ from patch_inference import (
     resolve_patch_size,
     resolve_stride,
 )
+from postprocess import remove_small_components
 
 
 def main() -> None:
@@ -41,6 +42,7 @@ def main() -> None:
     print(f"Stride: {stride}")
     print(f"Prediction batch size: {args.predict_batch_size}")
     print(f"TTA: {'enabled' if args.tta else 'disabled'}")
+    print(f"Postprocess min component size: {args.postprocess_min_size}")
     print(f"Generating diagnostics for {len(samples)} samples")
 
     for sample in samples:
@@ -52,6 +54,7 @@ def main() -> None:
             stride=stride,
             batch_size=args.predict_batch_size,
             threshold=args.threshold,
+            postprocess_min_size=args.postprocess_min_size,
             apply_fov=args.apply_fov,
             tta=args.tta,
             error_reference=args.error_reference,
@@ -81,6 +84,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stride", type=int, default=None, help="Sliding-window stride. Defaults to patch_size / 2.")
     parser.add_argument("--predict-batch-size", type=int, default=16, help="Patch prediction batch size.")
     parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for vessel pixels.")
+    parser.add_argument(
+        "--postprocess-min-size",
+        type=int,
+        default=0,
+        help="Minimum connected-component size to keep after thresholding. Use 0 for no postprocessing.",
+    )
     parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside DRIVE FoV to background.")
     parser.add_argument("--tta", action="store_true", help="Use reversible full-image flip TTA before thresholding.")
     parser.add_argument(
@@ -132,6 +141,7 @@ def create_diagnostic_figure(
     stride: int,
     batch_size: int,
     threshold: float,
+    postprocess_min_size: int,
     apply_fov: bool,
     tta: bool,
     error_reference: str,
@@ -152,6 +162,12 @@ def create_diagnostic_figure(
         tta=tta,
     )
     prediction = probability_to_binary_mask(probability, threshold=threshold)
+    fov = binarize_mask(arrays["fov_mask"]) if apply_fov else None
+    prediction = remove_small_components(
+        prediction,
+        min_size=postprocess_min_size,
+        fov_mask=fov,
+    )
 
     reference = manual_1 if error_reference == "manual_1" else manual_2
     if reference is None:
