@@ -23,6 +23,25 @@ def parse_args() -> argparse.Namespace:
         help="Directory containing '<id>_<split>_segmentation.png' prediction masks.",
     )
     parser.add_argument(
+        "--model-name",
+        default="cv_bce_dice_flips_valloss_pad_e120_aug_ensemble_tta",
+        help="Experiment/model name written in the Markdown report.",
+    )
+    parser.add_argument(
+        "--threshold",
+        default="0.45",
+        help="Threshold label written in the Markdown report.",
+    )
+    parser.add_argument(
+        "--next-step-note",
+        default=(
+            "El siguiente cambio con mas potencial es entrenamiento por parches balanceados. "
+            "Antes de implementarlo, se puede probar postprocesado pequeno solo si las metricas "
+            "muestran muchos componentes falsos positivos pequenos."
+        ),
+        help="Final interpretation note written in the Markdown report.",
+    )
+    parser.add_argument(
         "--output-dir",
         default=str(OUTPUTS_DIR / "results" / "error_analysis_t045_tta"),
         help="Directory where analysis CSV/Markdown outputs are saved.",
@@ -407,8 +426,8 @@ def build_report(rows: list[dict[str, str | float | int]], args: argparse.Namesp
         f"Predicciones: {args.predictions_dir}",
         f"Split: {args.split}",
         "Referencia principal: manual_1",
-        "Threshold: 0.45",
-        "Modelo: cv_bce_dice_flips_valloss_pad_e120_aug_ensemble_tta",
+        f"Threshold: {args.threshold}",
+        f"Modelo: {args.model_name}",
         "```",
         "",
         "## Resumen global",
@@ -460,8 +479,7 @@ def build_report(rows: list[dict[str, str | float | int]], args: argparse.Namesp
             "Los falsos positivos fuera del FoV son cero porque las predicciones finales se generaron con `--apply-fov`.",
             "Por tanto, el postprocesado de FoV ya esta funcionando.",
             "",
-            "El siguiente cambio con mas potencial es entrenamiento por parches balanceados.",
-            "Antes de implementarlo, se puede probar postprocesado pequeno solo si las metricas muestran muchos componentes falsos positivos pequenos.",
+            args.next_step_note,
         ]
     )
     return "\n".join(lines) + "\n"

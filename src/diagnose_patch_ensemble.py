@@ -6,16 +6,16 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from config import DATA_DIR, IMAGE_SIZE, OUTPUTS_DIR
+from config import DATA_DIR, OUTPUTS_DIR
 from data import binarize_mask, list_drive_samples, load_drive_sample
-from ensemble import (
-    configure_inference_environment,
-    find_model_paths,
-    infer_resize_strategy,
-    load_models,
-    predict_ensemble_probability,
+from ensemble import configure_inference_environment
+from patch_inference import (
+    load_patch_metadata,
+    load_patch_models,
+    predict_patch_ensemble_probability,
     probability_to_binary_mask,
-    resolve_models_image_size,
+    resolve_patch_size,
+    resolve_stride,
 )
 
 
@@ -23,10 +23,10 @@ def main() -> None:
     args = parse_args()
     configure_inference_environment(device=args.device, cuda_malloc_async=args.cuda_malloc_async)
 
-    resize_strategy = infer_resize_strategy(args.models_dir, requested=args.resize_strategy)
-    model_paths = find_model_paths(args.models_dir, pattern=args.model_pattern)
-    models = load_models(model_paths)
-    image_size = resolve_models_image_size(models, fallback=(args.image_height, args.image_width))
+    models, model_paths = load_patch_models(args.models_dir, pattern=args.model_pattern)
+    metadata = load_patch_metadata(args.models_dir)
+    patch_size = resolve_patch_size(models, metadata=metadata, fallback=args.patch_size)
+    stride = resolve_stride(args.stride, patch_size=patch_size)
     samples = select_samples(
         list_drive_samples(args.data_dir, split=args.split, require_manual_2=args.split == "test"),
         sample_ids=parse_sample_ids(args.sample_ids),
@@ -36,19 +36,21 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loaded {len(models)} models: {', '.join(path.name for path in model_paths)}")
-    print(f"Preprocessing strategy: {resize_strategy}")
-    print(f"Model image size: {image_size}")
+    print(f"Loaded {len(models)} patch models: {', '.join(path.name for path in model_paths)}")
+    print(f"Patch size: {patch_size}")
+    print(f"Stride: {stride}")
+    print(f"Prediction batch size: {args.predict_batch_size}")
     print(f"TTA: {'enabled' if args.tta else 'disabled'}")
     print(f"Generating diagnostics for {len(samples)} samples")
 
     for sample in samples:
-        output_path = output_dir / f"{sample.sample_id}_{args.split}_diagnostic.png"
+        output_path = output_dir / f"{sample.sample_id}_{args.split}_patch_diagnostic.png"
         create_diagnostic_figure(
             models=models,
             sample=sample,
-            image_size=image_size,
-            resize_strategy=resize_strategy,
+            patch_size=patch_size,
+            stride=stride,
+            batch_size=args.predict_batch_size,
             threshold=args.threshold,
             apply_fov=args.apply_fov,
             tta=args.tta,
@@ -59,35 +61,28 @@ def main() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate visual diagnostics for an ensemble prediction.")
+    parser = argparse.ArgumentParser(
+        description="Generate visual diagnostics for a patch-trained ensemble prediction."
+    )
     parser.add_argument(
         "--models-dir",
-        default=str(OUTPUTS_DIR / "models" / "cv_bce_dice_flips_valloss"),
-        help="Directory containing fold .keras models.",
+        default=str(OUTPUTS_DIR / "models" / "cv_bce_dice_patch128_balanced"),
+        help="Directory containing patch-trained fold .keras models.",
     )
     parser.add_argument("--model-pattern", default="fold_*.keras", help="Glob pattern for model files.")
     parser.add_argument("--data-dir", default=str(DATA_DIR), help="Path to DRIVE root folder.")
     parser.add_argument("--split", choices=("training", "test"), default="test", help="Split to diagnose.")
     parser.add_argument(
         "--output-dir",
-        default=str(OUTPUTS_DIR / "figures" / "ensemble_diagnostics"),
+        default=str(OUTPUTS_DIR / "figures" / "patch_ensemble_diagnostics"),
         help="Where diagnostic figures are saved.",
     )
-    parser.add_argument("--image-height", type=int, default=IMAGE_SIZE[0], help="Model input height.")
-    parser.add_argument("--image-width", type=int, default=IMAGE_SIZE[1], help="Model input width.")
-    parser.add_argument(
-        "--resize-strategy",
-        choices=("resize", "pad"),
-        default=None,
-        help="Preprocessing strategy. Defaults to metadata value when available.",
-    )
+    parser.add_argument("--patch-size", type=int, default=128, help="Fallback patch size.")
+    parser.add_argument("--stride", type=int, default=None, help="Sliding-window stride. Defaults to patch_size / 2.")
+    parser.add_argument("--predict-batch-size", type=int, default=16, help="Patch prediction batch size.")
     parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for vessel pixels.")
-    parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside the DRIVE FoV to background.")
-    parser.add_argument(
-        "--tta",
-        action="store_true",
-        help="Average original, horizontal flip, vertical flip and both-flip predictions before thresholding.",
-    )
+    parser.add_argument("--apply-fov", action="store_true", help="Force pixels outside DRIVE FoV to background.")
+    parser.add_argument("--tta", action="store_true", help="Use reversible full-image flip TTA before thresholding.")
     parser.add_argument(
         "--sample-ids",
         default="01,03,07,14,20",
@@ -106,11 +101,7 @@ def parse_args() -> argparse.Namespace:
         default="cpu",
         help="Default is cpu to avoid GPU memory pressure during diagnostics.",
     )
-    parser.add_argument(
-        "--cuda-malloc-async",
-        action="store_true",
-        help="Set TF_GPU_ALLOCATOR=cuda_malloc_async when using GPU.",
-    )
+    parser.add_argument("--cuda-malloc-async", action="store_true", help="Set TF_GPU_ALLOCATOR=cuda_malloc_async.")
     return parser.parse_args()
 
 
@@ -137,8 +128,9 @@ def select_samples(samples: list, sample_ids: list[str] | None, max_samples: int
 def create_diagnostic_figure(
     models: list,
     sample,
-    image_size: tuple[int, int],
-    resize_strategy: str,
+    patch_size: int,
+    stride: int,
+    batch_size: int,
     threshold: float,
     apply_fov: bool,
     tta: bool,
@@ -150,11 +142,12 @@ def create_diagnostic_figure(
     manual_1 = binarize_mask(arrays["manual_1"])
     manual_2 = binarize_mask(arrays["manual_2"]) if arrays["manual_2"] is not None else None
 
-    probability = predict_ensemble_probability(
+    probability = predict_patch_ensemble_probability(
         models=models,
         sample=sample,
-        image_size=image_size,
-        resize_strategy=resize_strategy,
+        patch_size=patch_size,
+        stride=stride,
+        batch_size=batch_size,
         apply_fov=apply_fov,
         tta=tta,
     )
@@ -170,7 +163,7 @@ def create_diagnostic_figure(
     dice_2 = dice_score(manual_2, prediction) if manual_2 is not None else None
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8), constrained_layout=True)
-    title = f"Sample {sample.sample_id} - threshold {threshold:.2f}"
+    title = f"Sample {sample.sample_id} - patch {patch_size} stride {stride} - threshold {threshold:.2f}"
     if tta:
         title += " - TTA"
     if dice_2 is None:
@@ -182,7 +175,7 @@ def create_diagnostic_figure(
     show_rgb(axes[0, 0], image, "Imagen original")
     show_mask(axes[0, 1], manual_1, "Mascara experto 1")
     show_mask(axes[0, 2], manual_2, "Mascara experto 2")
-    show_mask(axes[1, 0], prediction, "Prediccion ensemble")
+    show_mask(axes[1, 0], prediction, "Prediccion patch ensemble")
     show_rgb(
         axes[1, 1],
         overlay_error_mask(image, false_positive, color=(0.0, 1.0, 1.0)),
