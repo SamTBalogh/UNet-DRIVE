@@ -22,32 +22,6 @@ White pixels represent retinal vessels and black pixels represent background.
 | --- | --- | --- | --- |
 | ![Test image 03 vessel segmentation](results/final/segmentations/03_test_segmentation.png) | ![Test image 08 vessel segmentation](results/final/segmentations/08_test_segmentation.png) | ![Test image 16 vessel segmentation](results/final/segmentations/16_test_segmentation.png) | ![Test image 19 vessel segmentation](results/final/segmentations/19_test_segmentation.png) |
 
-## Project objectives
-
-The initial specification defined an end-to-end medical image segmentation
-problem rather than an isolated model-training exercise. Its technical
-objectives were:
-
-1. understand convolutional networks and the role of the encoder, decoder and
-   skip connections in U-Net;
-2. implement the system with TensorFlow and Keras 3;
-3. apply image-processing techniques appropriate for a small medical dataset,
-   including augmentation, padding and patching;
-4. implement and use DICE correctly instead of relying on background-dominated
-   pixel accuracy;
-5. train a five-fold U-Net system on DRIVE and exceed a mean DICE target of
-   `0.75`, averaging the scores against both test experts;
-6. return binary PNG segmentations with the same spatial dimensions as the
-   original images;
-7. preserve enough metadata for every fold to explain and reproduce each
-   programming and experimental decision;
-8. ensure that saved models are compatible with Keras 3 `load_model`.
-
-The final ensemble reached **0.832967677712** mean test DICE, exceeding the
-`0.75` target by **0.082967677712**. It produced the 20 required full-resolution
-PNG masks and was evaluated independently against both manual test
-segmentations.
-
 ## Implemented system
 
 - Configurable U-Net training for full images and balanced patches.
@@ -77,6 +51,32 @@ segmentations.
 11. [Stored evidence and model-weight policy](#stored-evidence-and-model-weight-policy)
 12. [Limitations and future work](#limitations-and-future-work)
 13. [References](#references)
+
+## Project objectives
+
+The initial specification defined an end-to-end medical image segmentation
+problem rather than an isolated model-training exercise. Its technical
+objectives were:
+
+1. understand convolutional networks and the role of the encoder, decoder and
+   skip connections in U-Net;
+2. implement the system with TensorFlow and Keras 3;
+3. apply image-processing techniques appropriate for a small medical dataset,
+   including augmentation, padding and patching;
+4. implement and use DICE correctly instead of relying on background-dominated
+   pixel accuracy;
+5. train a five-fold U-Net system on DRIVE and exceed a mean DICE target of
+   `0.75`, averaging the scores against both test experts;
+6. return binary PNG segmentations with the same spatial dimensions as the
+   original images;
+7. preserve enough metadata for every fold to explain and reproduce each
+   programming and experimental decision;
+8. ensure that saved models are compatible with Keras 3 `load_model`.
+
+The final ensemble reached **0.832967677712** mean test DICE, exceeding the
+`0.75` target by **0.082967677712**. It produced the 20 required full-resolution
+PNG masks and was evaluated independently against both manual test
+segmentations.
 
 ## Problem and dataset
 
