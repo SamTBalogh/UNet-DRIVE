@@ -1,0 +1,2 @@
+model,models,threshold,patch_size,stride,tta,n_images,mean_dice_manual_1,std_dice_manual_1,mean_dice_manual_2,std_dice_manual_2,mean_dice_total,std_dice_total,min_dice_total,max_dice_total,mean_positive_ratio_prediction
+cv_bce_dice_patch128_balanced_ensemble_stride32_tta,fold_1.keras;fold_2.keras;fold_3.keras;fold_4.keras;fold_5.keras,0.45,128,32,True,20,0.8227395474910736,0.015387554435137896,0.8431958079338073,0.016025265208713273,0.8329676777124405,0.01455445049114338,0.8027651309967041,0.8635362088680267,0.08740529155049097

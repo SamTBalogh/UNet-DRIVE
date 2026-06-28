@@ -41,12 +41,28 @@ dist/
 *.log
 logs/
 
-# Local datasets and generated data
-data/raw/
-data/processed/
+# Test and coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
-# Training outputs and generated artifacts
-outputs/
+# Local datasets and generated data (keep directory placeholders)
+data/raw/**
+!data/raw/.gitadd
+data/processed/**
+!data/processed/.gitadd
+
+# Training outputs and generated artifacts (keep public structure)
+outputs/**
+!outputs/figures/
+!outputs/figures/.gitadd
+!outputs/models/
+!outputs/models/.gitadd
+!outputs/results/
+!outputs/results/.gitadd
+!outputs/segmentations/
+!outputs/segmentations/.gitadd
 runs/
 wandb/
 mlruns/
